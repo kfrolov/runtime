@@ -1,13 +1,15 @@
-Name:		dotnet-runtime
-Version:	3.1
+Name:		coreclr
+Version:	3.1.0
 Release:	0
-Summary:	Microsoft .NET Runtime
+Summary:	Microsoft .NET Runtime: base package
 Group:		Development/Languages
 License:	MIT
 URL:		http://github.com/dotnet/runtime
 
 Source0: %{name}-%{version}.tar.gz
 Source1: %{name}.manifest
+
+ExcludeArch: aarch64
 
 BuildRequires:  python
 BuildRequires:  python-xml
@@ -24,8 +26,8 @@ BuildRequires:  clang >= 3.8
 BuildRequires:  clang-devel >= 3.8
 
 # do i need this?
-BuildRequires:  lldb >= 3.8
-BuildRequires:  lldb-devel >= 3.8
+#BuildRequires:  lldb >= 3.8
+#BuildRequires:  lldb-devel >= 3.8
 
 BuildRequires:  gettext-tools
 BuildRequires:  libopenssl1.1-devel
@@ -53,15 +55,38 @@ BuildRequires: clang-accel-aarch64-cross-aarch64
 %endif
 
 %description
-Microsoft .NET runtime (CoreCLR, CoreFX).
-The CoreCLR repo contains the complete runtime implementation for .NET Core. It includes RyuJIT, the .NET GC, native interop and many other components. It is cross-platform, with multiple OS and CPU ports in progress.
+Microsoft .NET runtime (CoreCLR).
+The CoreCLR repo contains the complete runtime implementation for .NET Core.
+It includes RyuJIT, the .NET GC, native interop and many other components.
+It is cross-platform, with multiple OS and CPU ports in progress.
+
+
+%package -n mscorlib
+Summary: Core Library for Microsoft .NET runtime
+Requires: coreclr
+%description -n mscorlib
+This package contains System.Private.CoreLib.dll file.
+
+
+%package -n corefx
+Summary: Microsoft .NET runtime: CoreFX library
+Requires: coreclr mscorlib
+%description -n corefx
+CoreFX library is the essential part of .NET runtime.
 
 
 %package devel
-Summary: Microsoft .NET runtime Development package
-Requires: dotnet-runtime
+Summary: Microsoft .NET runtime: development package
+Requires: coreclr
 %description devel
 Headers and static libraries...
+
+
+%package -n coreclr-managed-debug
+Summary:  Microsoft .NET runtime: managed code debugging information
+Requires: coreclr corefx mscorlib
+%description -n coreclr-managed-debug
+Debugging information needed for debugging and profiling managed code.
 
 
 # define default build type
@@ -70,7 +95,7 @@ Headers and static libraries...
 %endif
 
 # capitalized (CamelCase) build type
-%define Build %(printf "%s" "%{build_type}" | sed 's/^./\U&/')
+%define Build %(printf '%%s\\n' "%{build_type}" | sed 's/^./\\U&/')
 
 # number of processors available for running compiler
 %define nproc %(getconf _NPROCESSORS_CONF)
@@ -78,9 +103,9 @@ Headers and static libraries...
 %define clang_ver 5.0
 
 # default build options dependent on architecture
-%ifarch arm
+%ifarch %{arm}
 %define arch armel
-%define buildopts %{build_type} arm clang-%{clang_ver} numproc %{nproc}
+%define buildopts %{build_type} %{arch} clang-%{clang_ver} numproc %{nproc}
 %else
 %define arch %{_arch}
 %define buildopts %{build_type} clang numproc %{nproc}
@@ -90,25 +115,10 @@ Headers and static libraries...
 %define clr_cflags -cmakeargs '-DCMAKE_VERBOSE_MAKEFILE=ON -DCLR_ADDITIONAL_COMPILER_OPTIONS=-fasynchronous-unwind-tables\\;-gdwarf-2'
 
 # directory, where coreclr will be installed
-%define destdir %{_datadir}/%{name}/%{version}
+%define destdir %{_datadir}/dotnet/%{version}
 
 # path to files contained in dotnet-build-essentials
 %define dotnet_bin /opt
-
-
-# add *.pdb files to "debuginfo" package
-%package  debuginfo
-Summary:  Microsoft .NET debugging info
-Group:    Development/Debug
-AutoReq:  0
-AutoProv: 1
-%description debuginfo
-This package provides debugging information for %{name} package
-(this also includes .pdb files). This package is required for
-profiling running CoreCLR with "perf".
-%files debuginfo -f debugfiles.list
-%global __debug_install_post %{__debug_install_post} \
-    find %{buildroot}/%{destdir} -maxdepth 1 -type f -iname '*.pdb' >> debugfiles.list
 
 
 %prep
@@ -159,6 +169,9 @@ cat <<-.  > %{buildroot}/$each
 .
 chmod +x %{buildroot}/$each
 done
+
+# what is it?
+export CLANG_NO_LIBDIR_SUFFIX=1
 
 # add cmake-3.15 and nproc to PATH
 export PATH=%{buildroot}:${PATH}
@@ -213,28 +226,45 @@ src/libraries/Native/build-native.sh %{buildopts} %{clr_cflags}
 
 %install
 rm -rf %{buildroot}/%{destdir}
+mkdir -p $(dirname %{buildroot}/%{destdir})
 
 # CoreCLR runtime, including subdirectories
-cp -a "artifacts/bin/coreclr/Linux.%{arch}.%{Build}" %{destdir}
+cp -a "artifacts/bin/coreclr/Linux.%{arch}.%{Build}" %{buildroot}/%{destdir}
 
 # all PDB's should be in same directory as related DLL files
-mv %{destdir}/PDB/*.pdb %{destdir}
-rmdir %{destdir}/PDB
+mv %{buildroot}/%{destdir}/PDB/*.pdb %{buildroot}/%{destdir} || :
+rm -rf %{buildroot}/%{destdir}/PDB
 
 # unused directory (contains same files as in destdir)
-rm -rf ${destdir}/sharedFramework
+rm -rf %{buildroot}/%{destdir}/sharedFramework
+
+install_no_overwrite() (
+    set +x
+    dir="$1"
+    while read fname; do
+        if test -f "$dir/$fname"; then
+            echo "Won't overwrite $dir/$fname"
+            return 1
+        else
+            install "$fname" "$dir"
+        fi
+    done
+)
 
 # CoreFX native libraries (only top level files)
-find "artifacts/bin/native/Linux-%{arch}-%{Build}" -maxdepth 1 -type f \
-    | (while read f; do test -f "$f" && { echo "Wont overwrite $f!"; false; } || install "$f" %{destdir}; done)
+( cd "artifacts/bin/native/Linux-%{arch}-%{Build}"
+  find -maxdepth 1 -type f | install_no_overwrite "%{buildroot}/%{destdir}"
+)
 
 # CoreFX managed libraries (only top level files)
-find "artifacts/bin/runtime/netcoreapp5.0-Linux-%{Build}-%{arch}" -maxdeth 1 -type f -not -name '*.so' -not -name '*.a' \
-    | (while read f; do test -f "$f" && { echo "Wont overwrite $f!"; false; } || install "$f" %{destdir}; done)
+( cd "artifacts/bin/runtime/netcoreapp5.0-Linux-%{Build}-%{arch}"
+  find -maxdepth 1 -type f -not -name '*.so' -not -name '*.a' | install_no_overwrite "%{buildroot}/%{destdir}"
+)
 
 # create symlinks for compatibility
+mkdir -p %{buildroot}/%{_datadir}/dotnet/shared/Microsoft.NETCore.App
 for each in %{version} 2.0.0 2.1.0 2.1.1 2.1.4 3.0.0; do
-    ln -s %{destdir} %{_datadir}/dotnet/shared/Microsoft.NETCore.App/$each
+    ln -s %{destdir} %{buildroot}/%{_datadir}/dotnet/shared/Microsoft.NETCore.App/$each
 done
 
 
@@ -248,7 +278,15 @@ done
 %{destdir}/libdbgshim.so
 %{destdir}/libmscordaccore.so
 %{destdir}/libmscordbi.so
+# symlinks
+%{_datadir}/dotnet/shared/Microsoft.NETCore.App/*
+
+%files -n mscorlib
+%manifest %{name}.manifest
 %{destdir}/System.Private.CoreLib.dll
+
+%files -n corefx
+%manifest %{name}.manifest
 # CoreFX native libs
 %{destdir}/System.Globalization.Native.so
 %{destdir}/System.IO.Compression.Native.so
@@ -262,20 +300,27 @@ done
 %files devel
 %manifest %{name}.manifest
 # CoreCLR parts
+%{destdir}/coreconsole
+%{destdir}/corerun
+%{destdir}/createdump
 %{destdir}/libclrgc.so
 %{destdir}/libjitinterface.so
 %{destdir}/libsuperpmi-shim-collector.so
 %{destdir}/libsuperpmi-shim-counter.so
 %{destdir}/libsuperpmi-shim-simple.so
-%dir %{destdir}/IL
+%{destdir}/IL
 %{destdir}/*.md
-%dir %{destdir}/gcinfo
-%dir %{destdir}/inc
-%dir %{destdir}/lib
+%{destdir}/gcinfo
+%{destdir}/inc
+%{destdir}/lib
 %{destdir}/ilasm
 %{destdir}/ildasm
 %{destdir}/mcs
 %{destdir}/superpmi
 # CoreFX static libs
 %{destdir}/*.a
+
+%files -n coreclr-managed-debug
+%{destdir}/*.pdb
+%{destdir}/*.map
 
