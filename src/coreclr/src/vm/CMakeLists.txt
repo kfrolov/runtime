@@ -30,6 +30,15 @@ if(FEATURE_GDBJIT)
     )
 endif(FEATURE_GDBJIT)
 
+if(FEATURE_TIZEN)
+    set(VM_SOURCES_TIZEN
+        tizen.cpp
+    )
+    set(VM_HEADERS_TIZEN
+        tizen.h
+    )
+endif(FEATURE_TIZEN)
+
 if(FEATURE_JIT_PITCHING)
    add_definitions(-DFEATURE_JIT_PITCHING)
 endif(FEATURE_JIT_PITCHING)
@@ -396,6 +405,7 @@ set(VM_SOURCES_WKS
     typeparse.cpp
     weakreferencenative.cpp
     ${VM_SOURCES_GDBJIT}
+    ${VM_SOURCES_TIZEN}
 )
 
 set(VM_HEADERS_WKS
@@ -517,6 +527,7 @@ set(VM_HEADERS_WKS
     typeparse.h
     weakreferencenative.h
     ${VM_HEADERS_GDBJIT}
+    ${VM_HEADERS_TIZEN}
 )
 
 set(GC_SOURCES_WKS

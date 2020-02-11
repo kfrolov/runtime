@@ -18,6 +18,9 @@
 #ifdef FEATURE_GDBJIT
 #include "../../vm/gdbjithelpers.h"
 #endif // FEATURE_GDBJIT
+#ifdef FEATURE_TIZEN
+#include "../../vm/tizen_init.h"
+#endif
 
 #define ASSERTE_ALL_BUILDS(expr) _ASSERTE_ALL_BUILDS(__FILE__, (expr))
 
@@ -260,6 +263,10 @@ int coreclr_initialize(
         }
 #endif // _DEBUG
 
+#endif
+
+#ifdef FEATURE_TIZEN
+        Tizen::Initialize();
 #endif
     }
     return hr;

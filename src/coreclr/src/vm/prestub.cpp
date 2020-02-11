@@ -51,6 +51,10 @@
 #include "gdbjit.h"
 #endif // FEATURE_GDBJIT
 
+#if defined(FEATURE_TIZEN)
+#include "tizen.h"
+#endif
+
 #ifndef DACCESS_COMPILE
 
 #if defined(FEATURE_JIT_PITCHING)
@@ -319,13 +323,7 @@ PCODE MethodDesc::PrepareInitialCode()
 {
     STANDARD_VM_CONTRACT;
     PrepareCodeConfig config(NativeCodeVersion(this), TRUE, TRUE);
-    PCODE pCode = PrepareCode(&config);
-
-#if defined(FEATURE_GDBJIT) && defined(FEATURE_PAL) && !defined(CROSSGEN_COMPILE)
-    NotifyGdb::MethodPrepared(this);
-#endif
-
-    return pCode;
+    return PrepareCode(&config);
 }
 
 PCODE MethodDesc::PrepareCode(PrepareCodeConfig* pConfig)
@@ -335,7 +333,17 @@ PCODE MethodDesc::PrepareCode(PrepareCodeConfig* pConfig)
     // If other kinds of code need multi-versioning we could add more cases here,
     // but for now generation of all other code/stubs occurs in other code paths
     _ASSERTE(IsIL() || IsNoMetadata());
-    return PrepareILBasedCode(pConfig);
+    PCODE result = PrepareILBasedCode(pConfig);
+
+#if defined(FEATURE_GDBJIT) && defined(TARGET_UNIX) && !defined(CROSSGEN_COMPILE)
+    NotifyGdb::MethodPrepared(this);
+#endif
+
+#if defined(FEATURE_TIZEN) && !defined(CROSSGEN_COMPILE)
+    Tizen::MethodPrepared(this);
+#endif
+
+    return result;
 }
 
 bool MayUsePrecompiledILStub()
