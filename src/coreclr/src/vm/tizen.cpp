@@ -10,8 +10,6 @@
 #include "tizen_init.h"
 #include <stdio.h>
 
-extern "C" void *dlsym(void *, const char *);
-
 namespace
 {
     const unsigned PATH_MAX = 4096;
@@ -54,8 +52,38 @@ namespace
 
         TizenInterface() : _import(nullptr)
         {
+            #if 0
+            extern "C" void *dlsym(void *, const char *);
             void *addr = dlsym(NULL, TizenFuncName);
             if (!addr) return;
+
+            #else
+
+            unsigned count = 1024;
+            HMODULE modules[count];
+            HMODULE *modptr = modules;
+            NewHolder<HMODULE> modholder;
+
+            DWORD needed;
+            HANDLE process = GetCurrentProcess();
+
+            if (!EnumProcessModules(process, modptr, sizeof(HMODULE) * count, &needed))
+                return;
+
+            while (needed > sizeof(HMODULE) * count)
+            {
+                modholder = modptr = static_cast<HMODULE*>(operator new(needed));
+                count = needed / sizeof(HMODULE);
+
+                if (!EnumProcessModules(process, modptr, sizeof(HMODULE) * count, &needed))
+                    return;
+            }
+
+            void *addr = NULL;
+            for (HMODULE *curmod = modptr;  addr != NULL && curmod < &modptr[count]; ++curmod)
+                addr = reinterpret_cast<void*>(GetProcAddress(curmod, TizenFuncName));
+
+            #endif
 
             _import = reinterpret_cast<const Import* (*)(const Export*)>(addr)(&export_func);
         }
